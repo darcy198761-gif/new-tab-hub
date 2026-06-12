@@ -17,7 +17,7 @@ No server. No account. No external API calls beyond the search/create links you 
 Send your coding agent (Claude Code, Codex, etc.) this repo and say **"install this"**:
 
 ```
-https://github.com/DarcyZhu/new-tab-hub
+https://github.com/DarcyZhu-61/new-tab-hub
 ```
 
 The agent will walk you through it. Takes about 1 minute.
@@ -51,7 +51,7 @@ The agent will walk you through it. Takes about 1 minute.
 **1. Clone the repo**
 
 ```bash
-git clone https://github.com/DarcyZhu/new-tab-hub.git
+git clone https://github.com/DarcyZhu-61/new-tab-hub.git
 ```
 
 **2. Load the Chrome extension**

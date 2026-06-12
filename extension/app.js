@@ -26,6 +26,60 @@
 // All open tabs — populated by fetchOpenTabs()
 let openTabs = [];
 
+/* ----------------------------------------------------------------
+   FAVICON LOADING
+
+   Icons are loaded from Chrome's own locally-cached favicon store
+   (chrome-extension://<id>/_favicon/?pageUrl=...) — instant, offline,
+   and not dependent on www.google.com (which is slow/unreachable in
+   some regions and, with many tabs, used to leave the new-tab page
+   spinning while dozens of remote icon requests queued up).
+
+   The "favicon" permission in manifest.json enables the _favicon/ path.
+   If a cached icon is missing, onerror swaps in the Google s2 service
+   as a fallback; a second failure hides the <img> via the global
+   capture listener at the bottom of this file.
+   ---------------------------------------------------------------- */
+
+const GOOGLE_FAVICON = 'https://www.google.com/s2/favicons?domain=';
+
+/**
+ * faviconImg(pageUrl, domain, opts)
+ *
+ * Returns an <img> tag string for a favicon. Prefers Chrome's local
+ * cache keyed by the full page URL; falls back to the Google service
+ * keyed by domain. Always lazy-loaded so a page full of tabs doesn't
+ * fire every icon request at once.
+ *
+ *   pageUrl  full tab/link URL (preferred key for the local cache)
+ *   domain   hostname, used for the Google fallback + when no pageUrl
+ *   opts     { className, style }
+ */
+function faviconImg(pageUrl, domain, opts = {}) {
+  const cls   = opts.className || 'favicon-img';
+  const style = opts.style ? ` style="${opts.style}"` : '';
+  const fallback = domain ? GOOGLE_FAVICON + encodeURIComponent(domain) + '&sz=16' : '';
+
+  let primary = '';
+  try {
+    if (pageUrl) {
+      const u = new URL(chrome.runtime.getURL('/_favicon/'));
+      u.searchParams.set('pageUrl', pageUrl);
+      u.searchParams.set('size', '16');
+      primary = u.href;
+    }
+  } catch {}
+  if (!primary) primary = fallback;
+  if (!primary) return '';
+
+  // data-fallback lets the global error handler retry Google once before hiding.
+  const fb = (fallback && fallback !== primary)
+    ? ` data-fallback="${fallback.replace(/"/g, '&quot;')}"` : '';
+  return `<img class="${cls}" src="${primary}"${fb} alt="" loading="lazy" decoding="async"${style}>`;
+}
+
+
+
 /**
  * fetchOpenTabs()
  *
@@ -856,7 +910,6 @@ async function renderQuickLinks() {
  */
 function quickLinkTile(link, isCustom) {
   const host       = hostOf(link.url);
-  const faviconUrl = host ? `https://www.google.com/s2/favicons?domain=${host}&sz=16` : '';
   const safeUrl    = (link.url || '').replace(/"/g, '&quot;');
   const safeName   = (link.name || host || link.url || '').replace(/"/g, '&quot;');
 
@@ -867,7 +920,7 @@ function quickLinkTile(link, isCustom) {
       </div>` : '';
 
   return `<div class="quick-link-tile" data-action="navigate" data-url="${safeUrl}" title="${safeName}">
-      ${faviconUrl ? `<img class="ql-favicon favicon-img" src="${faviconUrl}" alt="">` : ''}
+      ${faviconImg(link.url, host, { className: 'ql-favicon favicon-img' })}
       <span class="ql-name">${safeName}</span>${actions}
     </div>`;
 }
@@ -938,9 +991,8 @@ function buildOverflowChips(hiddenTabs, urlCounts = {}) {
     const safeTitle = label.replace(/"/g, '&quot;');
     let domain = '';
     try { domain = new URL(tab.url).hostname; } catch {}
-    const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '';
     return `<div class="page-chip clickable${chipClass}" data-action="focus-tab" data-tab-url="${safeUrl}" title="${safeTitle}">
-      ${faviconUrl ? `<img class="chip-favicon favicon-img" src="${faviconUrl}" alt="">` : ''}
+      ${faviconImg(tab.url, domain, { className: 'chip-favicon favicon-img' })}
       <span class="chip-text">${label}</span>${dupeTag}
       <div class="chip-actions">
         <button class="chip-action chip-save" data-action="defer-single-tab" data-tab-url="${safeUrl}" data-tab-title="${safeTitle}" title="Save for later">
@@ -1019,9 +1071,8 @@ function renderDomainCard(group) {
     const safeTitle = label.replace(/"/g, '&quot;');
     let domain = '';
     try { domain = new URL(tab.url).hostname; } catch {}
-    const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '';
     return `<div class="page-chip clickable${chipClass}" data-action="focus-tab" data-tab-url="${safeUrl}" title="${safeTitle}">
-      ${faviconUrl ? `<img class="chip-favicon favicon-img" src="${faviconUrl}" alt="">` : ''}
+      ${faviconImg(tab.url, domain, { className: 'chip-favicon favicon-img' })}
       <span class="chip-text">${label}</span>${dupeTag}
       <div class="chip-actions">
         <button class="chip-action chip-save" data-action="defer-single-tab" data-tab-url="${safeUrl}" data-tab-title="${safeTitle}" title="Save for later">
@@ -1137,7 +1188,6 @@ async function renderDeferredColumn() {
 function renderDeferredItem(item) {
   let domain = '';
   try { domain = new URL(item.url).hostname.replace(/^www\./, ''); } catch {}
-  const faviconUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=16`;
   const ago = timeAgo(item.savedAt);
 
   return `
@@ -1145,7 +1195,7 @@ function renderDeferredItem(item) {
       <input type="checkbox" class="deferred-checkbox" data-action="check-deferred" data-deferred-id="${item.id}">
       <div class="deferred-info">
         <a href="${item.url}" target="_blank" rel="noopener" class="deferred-title" title="${(item.title || '').replace(/"/g, '&quot;')}">
-          <img src="${faviconUrl}" alt="" class="favicon-img" style="width:14px;height:14px;vertical-align:-2px;margin-right:4px">${item.title || item.url}
+          ${faviconImg(item.url, domain, { style: 'width:14px;height:14px;vertical-align:-2px;margin-right:4px' })}${item.title || item.url}
         </a>
         <div class="deferred-meta">
           <span>${domain}</span>
@@ -1710,11 +1760,18 @@ document.addEventListener('submit', async (e) => {
   }
 });
 
-// ---- Favicon fallback — hide broken favicon images.
+// ---- Favicon fallback — retry once via Google, then hide broken icons.
 // Replaces CSP-blocked inline onerror. Uses capture since 'error' doesn't bubble.
 document.addEventListener('error', (e) => {
   const t = e.target;
-  if (t && t.tagName === 'IMG' && t.classList.contains('favicon-img')) {
+  if (!t || t.tagName !== 'IMG' || !t.classList.contains('favicon-img')) return;
+  // First failure (usually a missing local _favicon cache entry): try the
+  // Google service once. Second failure: hide the image.
+  const fb = t.dataset.fallback;
+  if (fb) {
+    t.removeAttribute('data-fallback');
+    t.src = fb;
+  } else {
     t.style.display = 'none';
   }
 }, true);
